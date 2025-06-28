@@ -1,6 +1,8 @@
 import { BrowserRouter, Routes, Route, useParams } from 'react-router-dom';
 import LinkLite from './components/LinkLite';
 import { useEffect } from 'react';
+import ShortlinkGratis from './pages/ShortlinkGratis';
+import NggoVsLinktree from './pages/NggoVsLinktree';
 
 function RedirectShort() {
   const { shortcode } = useParams();
@@ -21,6 +23,8 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<LinkLite />} />
+        <Route path="/shortlink-gratis" element={<ShortlinkGratis />} />
+        <Route path="/nggo-vs-linktree" element={<NggoVsLinktree />} />
         <Route path="/:shortcode" element={<RedirectShort />} />
       </Routes>
     </BrowserRouter>

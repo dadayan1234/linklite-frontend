@@ -1,13 +1,39 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<urlset xmlns="https://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://nggo.site/</loc>
     <priority>1.0</priority>
   </url>
   <url>
-    <loc>https://nggo.site/about</loc>
+    <loc>https://nggo.site/shortlink-gratis</loc>
+    <priority>0.9</priority>
   </url>
   <url>
-    <loc>https://nggo.site/shortlink-gratis</loc>
+    <loc>https://nggo.site/tentang</loc>
   </url>
+  <url>
+    <loc>https://nggo.site/privacy</loc>
+  </url>
+  <url>
+  <loc>https://nggo.site/nggo-vs-linktree</loc>
+  </url>
+  <url>
+    <loc>https://nggo.site/faq</loc>  
+  </url>
+  <url>
+    <loc>https://nggo.site/terms</loc>
+  </url>
+  <url> 
+    <loc>https://nggo.site/shortlink-gratis/faq</loc>
+  </url>
+  <url>
+    <loc>https://nggo.site/shortlink-gratis/terms</loc>
+  </url>
+  <url>
+    <loc>https://nggo.site/shortlink-gratis/privacy</loc>
+  </url>
+  <url>
+    <loc>https://nggo.site/shortlink-gratis/tentang</loc>
+  </url>
+
 </urlset>
