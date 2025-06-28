@@ -3,6 +3,7 @@ import { Link, Copy, Trash2, Edit3, LogOut, Eye, Plus, Globe, Zap } from 'lucide
 
 const LinkLite = () => {
   const [currentUser, setCurrentUser] = useState(null);
+  const [authToken, setAuthToken] = useState(null);
   const [showRegister, setShowRegister] = useState(false);
   const [loginData, setLoginData] = useState({ username: '', password: '' });
   const [registerData, setRegisterData] = useState({ username: '', password: '' });
@@ -21,6 +22,11 @@ const LinkLite = () => {
   };
 
   const register = async () => {
+    if (!registerData.username || !registerData.password) {
+      showNotification("Please fill in all fields", 'error');
+      return;
+    }
+
     setLoading(true);
     try {
       const response = await fetch(`${baseUrl}/register`, {
@@ -44,20 +50,26 @@ const LinkLite = () => {
   };
 
   const login = async () => {
+    if (!loginData.username || !loginData.password) {
+      showNotification("Please fill in all fields", 'error');
+      return;
+    }
+
     setLoading(true);
     try {
       const response = await fetch(`${baseUrl}/token`, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: `username=${loginData.username}&password=${loginData.password}`
+        body: `username=${encodeURIComponent(loginData.username)}&password=${encodeURIComponent(loginData.password)}`
       });
 
       const data = await response.json();
       if (response.ok) {
         setCurrentUser(loginData.username);
+        setAuthToken(data.access_token);
         setLoginData({ username: '', password: '' });
         showNotification(`Welcome back, ${loginData.username}!`);
-        fetchUserLinks();
+        fetchUserLinks(data.access_token);
       } else {
         showNotification(data.detail || "Login failed", 'error');
       }
@@ -68,29 +80,56 @@ const LinkLite = () => {
   };
 
   const shorten = async () => {
-    if (!currentUser) {
+    if (!currentUser || !authToken) {
       showNotification("Please login first!", 'error');
+      return;
+    }
+
+    if (!shortenData.url) {
+      showNotification("Please enter a URL to shorten", 'error');
+      return;
+    }
+
+    // Validate URL format
+    try {
+      new URL(shortenData.url);
+    } catch {
+      showNotification("Please enter a valid URL (include http:// or https://)", 'error');
       return;
     }
 
     setLoading(true);
     try {
+      const payload = { original_url: shortenData.url };
+      if (shortenData.custom) {
+        payload.custom_code = shortenData.custom;
+      }
+
       const response = await fetch(`${baseUrl}/shorten`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${currentUser}`
+          "Authorization": `Bearer ${authToken}`
         },
-        body: JSON.stringify({ original_url: shortenData.url, custom_code: shortenData.custom })
+        body: JSON.stringify(payload)
       });
 
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "Shortening failed");
 
-      navigator.clipboard.writeText(data.short_url);
-      showNotification(`Short link created: ${data.short_url} (Copied to clipboard)`);
+      if (navigator.clipboard) {
+        try {
+          await navigator.clipboard.writeText(data.short_url);
+          showNotification(`Short link created: ${data.short_url} (Copied to clipboard)`);
+        } catch {
+          showNotification(`Short link created: ${data.short_url}`);
+        }
+      } else {
+        showNotification(`Short link created: ${data.short_url}`);
+      }
+      
       setShortenData({ url: '', custom: '' });
-      fetchUserLinks();
+      fetchUserLinks(authToken);
     } catch (error) {
       showNotification(error.message, 'error');
     }
@@ -98,61 +137,102 @@ const LinkLite = () => {
   };
 
   const setupLinkViewsWebSocket = (shortCode) => {
-    const ws = new WebSocket(`wss://link.m.site/ws/link-views/${shortCode}`);
-    
-    ws.onmessage = function(event) {
-      const data = JSON.parse(event.data);
-      setUserLinks(prevLinks => 
-        prevLinks.map(link => 
-          link.short_code === shortCode 
-            ? { ...link, visits: data.views }
-            : link
-        )
-      );
-    };
+    try {
+      const ws = new WebSocket(`wss://link.penaku.site/ws/link-views/${shortCode}`);
+      
+      ws.onmessage = function(event) {
+        try {
+          const data = JSON.parse(event.data);
+          setUserLinks(prevLinks => 
+            prevLinks.map(link => 
+              link.short_code === shortCode 
+                ? { ...link, visits: data.views }
+                : link
+            )
+          );
+        } catch (e) {
+          console.error('WebSocket message parsing error:', e);
+        }
+      };
 
-    return ws;
+      ws.onerror = function(error) {
+        console.error('WebSocket error:', error);
+      };
+
+      return ws;
+    } catch (error) {
+      console.error('WebSocket setup error:', error);
+      return null;
+    }
   };
 
-  const fetchUserLinks = async () => {
-    if (!currentUser) return;
+  const fetchUserLinks = async (token = authToken) => {
+    if (!currentUser || !token) return;
 
     try {
       const response = await fetch(`${baseUrl}/user/links`, {
         method: "GET",
-        headers: { "Authorization": `Bearer ${currentUser}` }
+        headers: { "Authorization": `Bearer ${token}` }
       });
 
+      if (!response.ok) {
+        throw new Error('Failed to fetch links');
+      }
+
       const links = await response.json();
-      setUserLinks(links);
+      setUserLinks(Array.isArray(links) ? links : []);
 
       // Close existing websockets
-      websocketsRef.current.forEach(ws => ws.close());
+      websocketsRef.current.forEach(ws => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.close();
+        }
+      });
       websocketsRef.current = [];
 
       // Setup new websockets
-      links.forEach(link => {
-        const ws = setupLinkViewsWebSocket(link.short_code);
-        websocketsRef.current.push(ws);
-      });
+      if (Array.isArray(links)) {
+        links.forEach(link => {
+          const ws = setupLinkViewsWebSocket(link.short_code);
+          if (ws) {
+            websocketsRef.current.push(ws);
+          }
+        });
+      }
     } catch (error) {
       console.error("Error fetching links:", error);
+      showNotification("Error fetching links", 'error');
     }
   };
 
   const saveEditLink = async () => {
+    if (!editModal.url) {
+      showNotification("Please enter a URL", 'error');
+      return;
+    }
+
+    // Validate URL format
+    try {
+      new URL(editModal.url);
+    } catch {
+      showNotification("Please enter a valid URL (include http:// or https://)", 'error');
+      return;
+    }
+
     setLoading(true);
     try {
+      const payload = { original_url: editModal.url };
+      if (editModal.customCode) {
+        payload.custom_code = editModal.customCode;
+      }
+
       const response = await fetch(`${baseUrl}/links/${editModal.shortCode}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${currentUser}`
+          "Authorization": `Bearer ${authToken}`
         },
-        body: JSON.stringify({ 
-          original_url: editModal.url, 
-          custom_code: editModal.customCode 
-        })
+        body: JSON.stringify(payload)
       });
 
       const data = await response.json();
@@ -176,14 +256,14 @@ const LinkLite = () => {
     try {
       const response = await fetch(`${baseUrl}/links/${shortCode}`, {
         method: "DELETE",
-        headers: { "Authorization": `Bearer ${currentUser}` }
+        headers: { "Authorization": `Bearer ${authToken}` }
       });
 
-      const data = await response.json();
       if (response.ok) {
         showNotification("Link deleted successfully");
         fetchUserLinks();
       } else {
+        const data = await response.json();
         showNotification(data.detail || "Failed to delete link", 'error');
       }
     } catch (error) {
@@ -192,31 +272,62 @@ const LinkLite = () => {
     setLoading(false);
   };
 
-  const copyLink = (link) => {
-    navigator.clipboard.writeText(link);
-    showNotification("Link copied to clipboard!");
+  const copyLink = async (link) => {
+    try {
+      if (navigator.clipboard) {
+        await navigator.clipboard.writeText(link);
+        showNotification("Link copied to clipboard!");
+      } else {
+        // Fallback for older browsers
+        const textArea = document.createElement('textarea');
+        textArea.value = link;
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+        showNotification("Link copied to clipboard!");
+      }
+    } catch (error) {
+      showNotification("Failed to copy link", 'error');
+    }
   };
 
   const logout = () => {
     setCurrentUser(null);
+    setAuthToken(null);
     setUserLinks([]);
-    websocketsRef.current.forEach(ws => ws.close());
+    websocketsRef.current.forEach(ws => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.close();
+      }
+    });
     websocketsRef.current = [];
     showNotification("Logged out successfully");
   };
 
+  // Handle Enter key press
+  const handleKeyPress = (e, action) => {
+    if (e.key === 'Enter') {
+      action();
+    }
+  };
+
   useEffect(() => {
     return () => {
-      websocketsRef.current.forEach(ws => ws.close());
+      websocketsRef.current.forEach(ws => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.close();
+        }
+      });
     };
   }, []);
 
   if (!currentUser) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 flex items-center justify-center p-4">
+      <div className="w-full min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 flex items-center justify-center p-4">
         {/* Notification */}
         {notification.show && (
-          <div className={`fixed top-4 right-4 p-4 rounded-lg shadow-lg z-50 animate-pulse ${
+          <div className={`fixed top-4 right-4 p-4 rounded-lg shadow-lg z-50 transition-all duration-300 ${
             notification.type === 'error' ? 'bg-red-500 text-white' : 'bg-green-500 text-white'
           }`}>
             {notification.message}
@@ -252,6 +363,7 @@ const LinkLite = () => {
                       placeholder="Username"
                       value={loginData.username}
                       onChange={(e) => setLoginData({...loginData, username: e.target.value})}
+                      onKeyPress={(e) => handleKeyPress(e, login)}
                       className="w-full px-4 py-4 bg-gray-50 border border-gray-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
                     />
                   </div>
@@ -261,6 +373,7 @@ const LinkLite = () => {
                       placeholder="Password"
                       value={loginData.password}
                       onChange={(e) => setLoginData({...loginData, password: e.target.value})}
+                      onKeyPress={(e) => handleKeyPress(e, login)}
                       className="w-full px-4 py-4 bg-gray-50 border border-gray-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
                     />
                   </div>
@@ -289,6 +402,7 @@ const LinkLite = () => {
                       placeholder="Username"
                       value={registerData.username}
                       onChange={(e) => setRegisterData({...registerData, username: e.target.value})}
+                      onKeyPress={(e) => handleKeyPress(e, register)}
                       className="w-full px-4 py-4 bg-gray-50 border border-gray-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition-all"
                     />
                   </div>
@@ -298,6 +412,7 @@ const LinkLite = () => {
                       placeholder="Password"
                       value={registerData.password}
                       onChange={(e) => setRegisterData({...registerData, password: e.target.value})}
+                      onKeyPress={(e) => handleKeyPress(e, register)}
                       className="w-full px-4 py-4 bg-gray-50 border border-gray-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition-all"
                     />
                   </div>
@@ -324,10 +439,10 @@ const LinkLite = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100">
+    <div className="w-full min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100">
       {/* Notification */}
       {notification.show && (
-        <div className={`fixed top-4 right-4 p-4 rounded-lg shadow-lg z-50 animate-pulse ${
+        <div className={`fixed top-4 right-4 p-4 rounded-lg shadow-lg z-50 transition-all duration-300 ${
           notification.type === 'error' ? 'bg-red-500 text-white' : 'bg-green-500 text-white'
         }`}>
           {notification.message}
@@ -335,7 +450,7 @@ const LinkLite = () => {
       )}
 
       {/* Header */}
-      <div className="bg-white/80 backdrop-blur-sm border-b border-gray-200 sticky top-0 z-40">
+      <div className="w-full bg-white/80 backdrop-blur-sm border-b border-gray-200 sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-4">
             <div className="flex items-center space-x-3">
@@ -362,9 +477,9 @@ const LinkLite = () => {
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* URL Shortener Section */}
-        <div className="bg-white/80 backdrop-blur-sm rounded-3xl shadow-xl border border-white/20 p-8 mb-8">
+        <div className="w-full bg-white/80 backdrop-blur-sm rounded-3xl shadow-xl border border-white/20 p-8 mb-8">
           <div className="text-center mb-8">
             <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-r from-blue-600 to-purple-600 rounded-2xl mb-4">
               <Zap className="w-8 h-8 text-white" />
@@ -373,7 +488,7 @@ const LinkLite = () => {
             <p className="text-gray-600">Transform long URLs into powerful, trackable short links</p>
           </div>
 
-          <div className="max-w-4xl mx-auto">
+          <div className="w-full max-w-4xl mx-auto">
             <div className="flex flex-col lg:flex-row gap-4">
               <div className="flex-1">
                 <input
@@ -381,6 +496,7 @@ const LinkLite = () => {
                   placeholder="Paste your long URL here..."
                   value={shortenData.url}
                   onChange={(e) => setShortenData({...shortenData, url: e.target.value})}
+                  onKeyPress={(e) => handleKeyPress(e, shorten)}
                   className="w-full px-6 py-4 text-lg bg-gray-50 border border-gray-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
                 />
               </div>
@@ -390,6 +506,7 @@ const LinkLite = () => {
                   placeholder="Custom code (optional)"
                   value={shortenData.custom}
                   onChange={(e) => setShortenData({...shortenData, custom: e.target.value})}
+                  onKeyPress={(e) => handleKeyPress(e, shorten)}
                   className="w-full px-6 py-4 text-lg bg-gray-50 border border-gray-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
                 />
               </div>
@@ -406,7 +523,7 @@ const LinkLite = () => {
         </div>
 
         {/* Links List */}
-        <div className="bg-white/80 backdrop-blur-sm rounded-3xl shadow-xl border border-white/20 p-8">
+        <div className="w-full bg-white/80 backdrop-blur-sm rounded-3xl shadow-xl border border-white/20 p-8">
           <div className="flex items-center space-x-3 mb-6">
             <Globe className="w-6 h-6 text-blue-600" />
             <h3 className="text-2xl font-bold text-gray-900">Your Shortened Links</h3>
@@ -425,7 +542,7 @@ const LinkLite = () => {
           ) : (
             <div className="space-y-4">
               {userLinks.map((link) => (
-                <div key={link.short_code} className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
+                <div key={link.short_code} className="w-full bg-white rounded-2xl p-6 shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
                   <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center space-x-3 mb-2">
@@ -439,7 +556,7 @@ const LinkLite = () => {
                         </a>
                         <div className="flex items-center space-x-1 text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded-full">
                           <Eye className="w-3 h-3" />
-                          <span>{link.visits}</span>
+                          <span>{link.visits || 0}</span>
                         </div>
                       </div>
                       <p className="text-gray-600 text-sm truncate" title={link.original_url}>
