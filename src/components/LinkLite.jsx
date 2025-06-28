@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link, Copy, Trash2, Edit3, LogOut, Eye, Plus, Globe, Zap, QrCode } from 'lucide-react';
 
 // Konfigurasi dasar, pastikan URL backend Anda benar
-const baseUrl = "https://link.penaku.site";
+const baseUrl = "https://link.nggo.site";
 
 // =================================================================
 // Komponen 1: Notifikasi
