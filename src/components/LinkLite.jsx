@@ -1,6 +1,39 @@
 import React, { useState, useEffect } from 'react';
 import { Link, Copy, Trash2, Edit3, LogOut, Eye, Plus, Globe, Zap, QrCode } from 'lucide-react';
 
+const [liveViews, setLiveViews] = useState({});
+useEffect(() => {
+  const sockets = {};
+
+  userLinks.forEach((link) => {
+    const socket = new WebSocket(`wss://link.nggo.site/ws/link-views/${link.short_code}`);
+
+    socket.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      setLiveViews((prev) => ({
+        ...prev,
+        [link.short_code]: data.views,
+      }));
+    };
+
+    socket.onerror = (e) => {
+      console.error(`WS error for ${link.short_code}`, e);
+    };
+
+    socket.onclose = () => {
+      console.log(`WS closed for ${link.short_code}`);
+    };
+
+    sockets[link.short_code] = socket;
+  });
+
+  return () => {
+    // Cleanup on unmount
+    Object.values(sockets).forEach((s) => s.close());
+  };
+}, [userLinks]);
+
+
 // Konfigurasi dasar, pastikan URL backend Anda benar
 const baseUrl = "https://link.nggo.site";
 
@@ -253,7 +286,7 @@ const Dashboard = ({ currentUser, token, onLogout, showNotification }) => {
                   <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
                     <div className="flex-1 min-w-0"><a href={link.short_url} target="_blank" rel="noopener noreferrer" className="text-lg font-semibold text-blue-600 hover:underline truncate">{link.short_url}</a><p className="text-gray-600 text-sm truncate" title={link.original_url}>{link.original_url}</p></div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <div className="flex items-center space-x-1 text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded-full"><Eye className="w-3 h-3" /><span>{link.visits || 0}</span></div>
+                      <div className="flex items-center space-x-1 text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded-full"><Eye className="w-3 h-3" /><span>{liveViews[link.short_code] ?? link.visits ?? 0}</span></div>
                       <button onClick={() => navigator.clipboard.writeText(link.short_url).then(() => showNotification('Link disalin!'))} className="flex items-center space-x-2 bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-xl text-sm"><Copy className="w-4 h-4" /><span>Copy</span></button>
                       <button onClick={() => setEditModal({ show: true, link: link })} className="flex items-center space-x-2 bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded-xl text-sm"><Edit3 className="w-4 h-4" /><span>Edit</span></button>
                       <button onClick={() => setQrModal({ show: true, shortCode: link.short_code })} className="flex items-center space-x-2 bg-gray-700 hover:bg-gray-800 text-white px-4 py-2 rounded-xl text-sm"><QrCode className="w-4 h-4" /><span>QR Code</span></button>
