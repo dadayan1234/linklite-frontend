@@ -1,37 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, Copy, Trash2, Edit3, LogOut, Eye, Plus, Globe, Zap, QrCode } from 'lucide-react';
 
-const [liveViews, setLiveViews] = useState({});
-useEffect(() => {
-  const sockets = {};
-
-  userLinks.forEach((link) => {
-    const socket = new WebSocket(`wss://link.nggo.site/ws/link-views/${link.short_code}`);
-
-    socket.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      setLiveViews((prev) => ({
-        ...prev,
-        [link.short_code]: data.views,
-      }));
-    };
-
-    socket.onerror = (e) => {
-      console.error(`WS error for ${link.short_code}`, e);
-    };
-
-    socket.onclose = () => {
-      console.log(`WS closed for ${link.short_code}`);
-    };
-
-    sockets[link.short_code] = socket;
-  });
-
-  return () => {
-    // Cleanup on unmount
-    Object.values(sockets).forEach((s) => s.close());
-  };
-}, [userLinks]);
 
 
 // Konfigurasi dasar, pastikan URL backend Anda benar
@@ -203,6 +172,40 @@ const Dashboard = ({ currentUser, token, onLogout, showNotification }) => {
   const [loading, setLoading] = useState(false);
   const [qrModal, setQrModal] = useState({ show: false, shortCode: null });
   const [editModal, setEditModal] = useState({ show: false, link: null });
+  const [liveViews, setLiveViews] = useState({});
+
+  // Hook ini akan membuat koneksi WebSocket untuk setiap link yang dimiliki user
+  // dan memperbarui jumlah views secara real-time.
+  useEffect(() => {
+  const sockets = {};
+
+  userLinks.forEach((link) => {
+    const socket = new WebSocket(`wss://link.nggo.site/ws/link-views/${link.short_code}`);
+
+    socket.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      setLiveViews((prev) => ({
+        ...prev,
+        [link.short_code]: data.views,
+      }));
+    };
+
+    socket.onerror = (e) => {
+      console.error(`WS error for ${link.short_code}`, e);
+    };
+
+    socket.onclose = () => {
+      console.log(`WS closed for ${link.short_code}`);
+    };
+
+    sockets[link.short_code] = socket;
+  });
+
+  return () => {
+    // Cleanup on unmount
+    Object.values(sockets).forEach((s) => s.close());
+  };
+}, [userLinks]);
 
   // Fungsi ini mengambil daftar link dari backend
   const fetchUserLinks = async () => {
